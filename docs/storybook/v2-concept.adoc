@@ -1,0 +1,12 @@
+= Storybook Component Documentation - V2 Concept
+Bastian Jakobi <bastian.jakobi@capgemini.com>; Kim Tran <kim.tran@capgemini.com>
+:source-highlighter: highlight.js
+
+The goal of this document is to describe all expectations and requirements for an improved version of our current Storybook Component Documentation. After outlining all requirements, a detailed description of the proposed new documentation concept, including structuring guidelines for both the documentation itself as well as the underlying folder- and file-structure, will be provided.
+
+== Expectations and Requirements
+To provide optimal guidance and in-depth information to all developers working with the OneCX libraries, our Storybook Component Documentation should fulfill the following requirements:
+
+* Each component must have a top level documentation page written in MDX that explains the purpose and usage of the component as well as going over all 
+* All **standard** use cases for each component should be covered by an easy to understand Story
+** Stories should not cover every possible use case or state of the component but rather provide quick and focused overviews of the most common use cases and encourage developers to explore the component in more detail
