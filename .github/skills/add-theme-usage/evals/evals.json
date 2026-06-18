@@ -1,0 +1,26 @@
+{
+  "skill_name": "add-theme-usage",
+  "evals": [
+    {
+      "id": 0,
+      "name": "card-url-only",
+      "prompt": "https://primeng.org/card",
+      "expected_output": "End-to-end wiring of the card usage: primitives (if needed), schema/card.ts registered in usages, mapping-rules/usages/card.rules.ts spread into usage-mapping-rules.ts, ThemePath extended with a card branch, empty css-rules/usages/card.rules.ts wired into usage-css-rules.ts (with TODO comments for any CSS-only candidates). lint/test/build pass on affected projects.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "dialog-url-only",
+      "prompt": "https://primeng.org/dialog",
+      "expected_output": "Same end-to-end wiring for dialog. Likely needs a settings block (modal default, position, closable defaults) per the rules in SKILL.md, and likely reuses or extends the overlay primitive family. CSS-rule scaffold lists candidates such as backdrop/transition specifics if PrimeNG does not expose tokens for them.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "message-url-only",
+      "prompt": "https://primeng.org/message",
+      "expected_output": "Same end-to-end wiring for message. Color-heavy usage: per-severity (info/success/warn/error) background and text. CSS-rule scaffold should mention severity-specific or icon styling that PrimeNG renders but does not expose as a design token.",
+      "files": []
+    }
+  ]
+}

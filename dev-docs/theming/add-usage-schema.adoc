@@ -1,0 +1,347 @@
+= Adding a New Usage Schema
+
+:idprefix:
+:idseparator: -
+:toc: macro
+:toclevels: 3
+:source-highlighter: highlight.js
+:schema_root: ../../libs/integration-interface/src/lib/topics/current-themes/v1
+:mapper_root: ../../libs/angular-utils/theme/primeng/src/utils/mapper
+
+This guide walks through the end-to-end process of adding a **new usage** to the Theme V2 schema and wiring it through the PrimeNG preset mapper. A "usage" is the component-specific token group that themes a single PrimeNG component (or a closely related family of components).
+
+The walkthrough uses the `p-tooltip` usage from link:https://github.com/onecx/onecx-portal-ui-libs/pull/1531[PR #1531] as the worked example, mapped against link:https://primeng.org/tooltip[the PrimeNG Tooltip docs].
+
+The scope of this guide is **schema definition and PrimeNG preset mapping**. Style additions that require hand-written CSS rules (the `CssRule` pipeline in link:{mapper_root}/css-rules[mapper/css-rules]) are out of scope — see link:theme-v2.adoc#adding-a-css-rule[theme-v2.adoc § Adding a New CSS Rule] for that path.
+
+toc::[]
+
+[#prerequisites]
+== Prerequisites
+
+Before starting, make sure you understand:
+
+* link:theme-v2.adoc[Theme V2 Architecture] — top-level structure, primitives, usages, theme references, the mapping pipeline.
+* https://zod.dev[Zod schema basics] — `z.object`, `.optional()`, `.default()`, `.union`, `.register`.
+* The PrimeNG token tree of the component you are theming. The fastest path is the **Theming → Design Tokens** section of the component's PrimeNG docs page (for tooltip: https://primeng.org/tooltip#theming.tokens). Each row in that table corresponds to a leaf in `components.<component>` inside the PrimeNG preset.
+
+[#overview]
+== Overview
+
+Adding a usage requires changes in two libraries:
+
+[cols="1,2"]
+|===
+| Library | Purpose
+
+| `integration-interface`
+| Owns the Zod **schema** that defines and validates the usage shape.
+
+| `angular-utils` (theme/primeng)
+| Owns the **mapping rules** that translate resolved schema values into PrimeNG preset paths, and the compile-time `ThemePath` union.
+|===
+
+The five-step recipe:
+
+. Pick the PrimeNG tokens you want to expose.
+. (Optional) Add any missing **primitive** tokens that the new defaults need.
+. Create the **usage schema** file under `integration-interface`.
+. Register the new usage in the top-level `usages` object.
+. Add the **mapping rules** file and extend `ThemePath` under `angular-utils`.
+
+Each step is detailed below.
+
+[#step-1]
+== Step 1 — Pick the PrimeNG Tokens
+
+Open the PrimeNG docs of the target component, scroll to the **Design Tokens** table, and decide which tokens you want themes to be able to control.
+
+For `p-tooltip`, the relevant token paths are:
+
+[cols="2,2"]
+|===
+| PrimeNG token | Notes
+
+| `tooltip.max-width`            | Layout
+| `tooltip.gutter`               | Layout
+| `tooltip.shadow`               | Elevation
+| `tooltip.padding`              | Spacing
+| `tooltip.border.radius`        | Shape
+| `tooltip.background`           | Color (per `colorScheme`)
+| `tooltip.color`                | Color (per `colorScheme`)
+|===
+
+These translate to PrimeNG preset dot-paths of the form:
+
+[source]
+----
+components.tooltip.root.maxWidth
+components.tooltip.root.gutter
+components.tooltip.root.shadow
+components.tooltip.root.padding
+components.tooltip.root.borderRadius
+components.tooltip.colorScheme.{mode}.root.background
+components.tooltip.colorScheme.{mode}.root.color
+----
+
+NOTE: Color tokens that PrimeNG splits per light/dark scheme must be mapped via the `{mode}` placeholder so the mapper writes both `light` and `dark` variants (see link:theme-v2.adoc#mapping-rule-to[theme-v2.adoc § `to` — Preset Path]).
+
+NOTE: Beyond `root` PrimeNG groups (e.g. `colorScheme.{mode}.root`, `colorScheme.{mode}.arrow`, etc.) work the same way — pick the deepest leaf you want to expose.
+
+[#step-2]
+== Step 2 — Add Missing Primitive Tokens (If Needed)
+
+Before defining the usage, check whether your intended `.default("{{primitives.…}}")` references already exist in link:{schema_root}/schema/primitives.ts[primitives.ts]. If not, add them.
+
+The tooltip needed a new layout primitive for the max-width of overlay components, so the PR added `overlayMaxWidth` to the existing `layout` block:
+
+[source,typescript]
+----
+// libs/integration-interface/src/lib/topics/current-themes/v1/schema/primitives.ts
+export const layout = z
+  .object({
+    contentMaxWidth: withRef(z.string()).optional(),
+    overlayMaxWidth: withRef(z.string()).optional(), // ← new
+    gap: withRef(z.string()).optional(),
+  })
+  .register(themeSchemaRegistry, { id: "layout" });
+----
+
+Rules of thumb:
+
+* If the value is generic enough to be reused by **other** usages (overlays in general, additional spacing scales, additional radius steps), put it in `primitives`.
+* If it is unique to the component, keep it inside the usage schema instead.
+* Always wrap scalars with `withRef(...)` so theme references (`"{{...}}"`) remain valid values.
+
+[#step-3]
+== Step 3 — Create the Usage Schema
+
+Create a new file under link:{schema_root}/schema[`schema/`], named after the component (`tooltip.ts`, `dialog.ts`, `card.ts`, …).
+
+Use the existing primitive building blocks (`bg`, `border`, `color`, `font`, `withRef`, …) to compose the shape. Every leaf should have a `.default("{{primitives.…}}")` reference so themes that only define primitives still get a consistent look.
+
+The full tooltip schema:
+
+[source,typescript]
+----
+// libs/integration-interface/src/lib/topics/current-themes/v1/schema/tooltip.ts
+/**
+ * This file defines the schema for tooltip theming. It, by default, uses
+ * primitives for default values but allows overriding any of them with
+ * custom values.
+ */
+import * as z from "zod";
+import { bg, border, color, withRef } from "./primitives";
+import { themeSchemaRegistry } from "./registry";
+
+export const tooltipSettings = z
+  .object({
+    position: withRef(
+      z.enum(["top", "bottom", "left", "right"])
+    ).default("top"),
+    showDelay: withRef(z.number()).default(0),
+    hideDelay: withRef(z.number()).default(0),
+  })
+  .register(themeSchemaRegistry, { id: "tooltipSettings" });
+
+export const tooltip = z
+  .object({
+    settings: (tooltipSettings as typeof tooltipSettings).optional(),
+    maxWidth: withRef(z.string()).default("{{primitives.layout.overlayMaxWidth}}"),
+    gutter:   withRef(z.string()).default("{{primitives.space.sm}}"),
+    shadow:   withRef(z.string()).default("{{primitives.shadow.md}}"),
+    padding:  withRef(z.string()).default("{{primitives.space.md}}"),
+    border: border.default({
+      radius: "{{primitives.radius.md}}",
+    }),
+    background: z
+      .union([bg, withRef(z.string())])
+      .default("{{primitives.area.overlay.defaultState.defaultVariant.bg}}"),
+    color: color.default(
+      "{{primitives.area.overlay.defaultState.defaultVariant.contrast}}"
+    ),
+  })
+  .register(themeSchemaRegistry, { id: "tooltip" });
+----
+
+Authoring conventions:
+
+* **Always** call `.register(themeSchemaRegistry, { id: "<usage>" })` on every exported schema. The id is the public identifier of that schema fragment and must be unique.
+* Prefer **enums wrapped in `withRef(...)`** for choice fields, so themes may either pick a literal (`"top"`) or a reference (`"{{primitives.…}}"`).
+* For tokens that PrimeNG models as colors, use `color` (string or `{ light, dark }`). For tokens that PrimeNG accepts as a full background spec, use `z.union([bg, withRef(z.string())])` so themes may pass either a color string or a structured `bg` object.
+* When you only want to set a single sub-property of a structured primitive (`border.radius` without forcing `border.color/width/style`), use `border.default({ radius: "…" })` — Zod fills the rest as undefined and the mapper skips undefined leaves.
+
+[#settings-object]
+=== When to Add a `settings` Object
+
+PrimeNG components expose two kinds of knobs:
+
+. **Design tokens** — visual styling that belongs in the theme (colors, spacing, radii, shadows, …). These go into the top level of the usage schema and are wired through mapping rules.
+. **Component inputs** — behavioural defaults that the consumer normally sets per usage site (`pTooltip` directive, `[showDelay]`, `[tooltipPosition]`, `[hideDelay]`, …). Some of these inputs make sense to standardise **globally per theme** so that every tooltip in the workspace feels the same.
+
+The `settings` object is the place to expose the second category. The tooltip usage uses it for `position`, `showDelay`, and `hideDelay` — values a designer may legitimately want to fix workspace-wide so all tooltips share a consistent position and animation timing.
+
+Add an input to `settings` when **all** of the following hold:
+
+* It is a PrimeNG component input (not a design token).
+* A sensible default for it is independent of any specific screen, dataset, or business flow.
+* Centralising it improves consistency across the workspace.
+
+Do **not** add an input to `settings` when its value is intrinsically per-use-case. As a rule of thumb, anything driven by data, business logic, or screen layout belongs to the consuming application, not the theme. Examples that should **never** appear in `settings`:
+
+[cols="1,3"]
+|===
+| Input | Why not
+
+| `value`, `data`, `options`
+| Data is owned by the screen / feature.
+
+| `columns`, `fields`, `model`
+| Structural configuration that varies per use case.
+
+| `[disabled]`, `[readonly]`, `[required]`, `[loading]`
+| State that depends on the current user interaction or business rules.
+
+| Event handlers, callbacks, templates
+| Per-screen behaviour and rendering.
+
+| Identifiers, labels, translation keys
+| Per-instance content.
+|===
+
+Authoring rules for `settings`:
+
+* Place it as the first property of the usage object: `settings: (<usage>Settings as typeof <usage>Settings).optional()`.
+* Define it as its own exported `z.object` named `<usage>Settings` and register it with `themeSchemaRegistry`.
+* Wrap every field in `withRef(...)` so themes can reference primitives or other settings.
+* Do **not** add `.default()`s to `settings` fields. PrimeNG should decide the default internally.
+* Do **not** add mapping rules for `settings` fields. The mapper only emits PrimeNG preset tokens; component inputs are consumed by application code (e.g. an Angular service or wrapper component that reads the published theme topic and applies the defaults when binding the directive/component).
+
+[#step-4]
+== Step 4 — Register the Usage in `usages`
+
+Open link:{schema_root}/current-themes.schema.ts[current-themes.schema.ts] and add the new usage to the `usages` object:
+
+[source,typescript]
+----
+import { region } from "./schema/region";
+import { table } from "./schema/table";
+import { tooltip } from "./schema/tooltip"; // ← new
+import { themeSchemaRegistry } from "./schema/registry";
+
+const usages = z
+  .object({
+    region: (region as typeof region).optional(),
+    table:  (table as typeof table).optional(),
+    tooltip: (tooltip as typeof tooltip).optional(), // ← new
+  })
+  .register(themeSchemaRegistry, { id: "usages" });
+----
+
+Notes:
+
+* Every usage entry must be `.optional()` — a theme is free to leave any usage unspecified, in which case the Shell still publishes the resolved defaults.
+* Keep the `(schema as typeof schema)` cast pattern. It is in place to prevent TypeScript depth-explosion errors (TS2589) when the union of all usages grows.
+* If your usage adds new public TypeScript types that consumers should be able to import, also re-export them from the library's barrel (`libs/integration-interface/src/index.ts`).
+
+[#step-5]
+== Step 5 — Add Mapping Rules and Extend `ThemePath`
+
+This step lives in the `angular-utils` library and has two parts.
+
+[#step-5a]
+=== 5a — Add the Mapping Rules File
+
+Create a file under link:{mapper_root}/mapping-rules/usages[`mapping-rules/usages/`] named after the component (`tooltip.rules.ts`, `dialog.rules.ts`, …).
+
+For tooltip:
+
+[source,typescript]
+----
+// libs/angular-utils/theme/primeng/src/utils/mapper/mapping-rules/usages/tooltip.rules.ts
+import type { MappingRule } from '../../mapper.types';
+import { toColorString } from '../../mapper.utils';
+
+export const tooltipMappingRules: MappingRule[] = [
+  { from: 'usages.tooltip.maxWidth',       to: 'components.tooltip.root.maxWidth' },
+  { from: 'usages.tooltip.gutter',         to: 'components.tooltip.root.gutter' },
+  { from: 'usages.tooltip.shadow',         to: 'components.tooltip.root.shadow' },
+  { from: 'usages.tooltip.padding',        to: 'components.tooltip.root.padding' },
+  { from: 'usages.tooltip.border.radius',  to: 'components.tooltip.root.borderRadius' },
+  {
+    from: 'usages.tooltip.background',
+    to:   'components.tooltip.colorScheme.{mode}.root.background',
+    transform: toColorString,
+  },
+  {
+    from: 'usages.tooltip.color',
+    to:   'components.tooltip.colorScheme.{mode}.root.color',
+    transform: toColorString,
+  },
+];
+----
+
+Then spread it into the aggregated array in link:{mapper_root}/mapping-rules/usage-mapping-rules.ts[usage-mapping-rules.ts]:
+
+[source,typescript]
+----
+import type { MappingRule } from '../mapper.types';
+import { datatableMappingRules } from './usages/datatable.rules';
+import { tooltipMappingRules } from './usages/tooltip.rules'; // ← new
+
+export const usageMappingRules: MappingRule[] = [
+  ...datatableMappingRules,
+  ...tooltipMappingRules, // ← new
+];
+----
+
+Mapping rule conventions:
+
+* **One `from` → one `to`.** No fan-out, no conditional logic — keep complexity in `transform` if absolutely needed.
+* Use **`toColorString`** as `transform` for anything that resolves to a `color`/`bg` value. It normalises plain strings, `{ light, dark }` objects, and `{ color, image, … }` bg-objects into a single CSS color string.
+* Use the **`{mode}` placeholder** whenever the PrimeNG target path sits under `colorScheme.<light|dark>.…`. The mapper expands it into both `light` and `dark` paths automatically.
+* No edits to `mapper.ts` are required — it iterates `MAPPING_RULES` (the aggregation of primitive and usage rules).
+
+[#step-5b]
+=== 5b — Extend `ThemePath`
+
+`ThemePath` is the compile-time union that constrains every rule's `from` field. Add a branch for the new usage in link:{mapper_root}/theme-path.types.ts[theme-path.types.ts]:
+
+[source,typescript]
+----
+// libs/angular-utils/theme/primeng/src/utils/mapper/theme-path.types.ts
+export type ThemePath =
+  | `primitives.${LeafPaths<NonNullable<Primitives>>}`
+  | `usages.region.${LeafPaths<NonNullable<Usages['region']>>}`
+  | `usages.table.${LeafPaths<NonNullable<Usages['table']>>}`
+  | `usages.tooltip.${LeafPaths<NonNullable<Usages['tooltip']>>}` // ← new
+----
+
+Why one branch per usage (instead of `usages.${LeafPaths<Usages>}`)? Computing `LeafPaths` independently per subtree keeps each instantiation small enough to stay within the TypeScript instantiation budget. Skipping this step would either fail to type-check the rules (typos go through silently) or hit a TS2589 depth error.
+
+The `to` side is already constrained by `PresetPath`, which is derived from `@primeuix/themes/types` — no changes are needed there.
+
+[#step-6]
+== Step 6 — Verify
+
+Run the affected tasks for both libraries from the workspace root:
+
+* `nx affected lint (current work)`
+* `nx affected test (current work)`
+* `nx affected build (current work)`
+
+Spot checks:
+
+* A deliberate typo in either `from` or `to` of a new mapping rule should produce a TypeScript error. If it does not, `ThemePath` was not extended in <<step-5b>>.
+* A theme that defines **only primitives** should still produce a fully populated PrimeNG preset for the new component — confirming that every leaf has a `.default("{{primitives.…}}")` reference.
+* A theme that overrides a single leaf of your usage (e.g. only `usages.tooltip.background`) should retain the primitive-derived defaults for every other leaf.
+
+[#cross-references]
+== Related Documentation
+
+* link:theme-v2.adoc[Theme V2 Architecture] — the full picture this guide drops you into
+* link:concept.adoc[Theming Concept] — what a OneCX theme is
+* link:primeng.adoc[PrimeNG Theming Integration] — preset structure, OneCX `extend` section
+* link:theme-overrides.adoc[Theme Overrides] — per-application token overrides
+* link:https://github.com/onecx/onecx-portal-ui-libs/pull/1531[PR #1531] — the worked tooltip example
+* link:https://primeng.org/tooltip[PrimeNG Tooltip docs] — token reference for the example
