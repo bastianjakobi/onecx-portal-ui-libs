@@ -1137,13 +1137,15 @@ export class DataTableComponent extends DataSortBase implements OnInit {
   }
   
   getRowSummary(rowObject: any): string {
-    let summary = ''
-    const columns = Object.entries(rowObject)
-    columns.forEach(([key, value], index) => {
-      summary += `${key}: ${value}${index < columns.length - 1 ? ',' : ''}`
+    const parts: string[] = []
+    this.stateService.columns().forEach((column) => {
+      const value = ObjectUtils.resolveFieldData(rowObject, column.id)
+      if (value !== null && value !== undefined && value !== '') {
+        parts.push(`${column.id}: ${value}`)
+      }
     })
-    
-    return summary.trim()
+
+    return parts.join(', ')
   }
 }
 

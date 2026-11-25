@@ -2462,10 +2462,44 @@ describe('DataTableComponent', () => {
     })
   })
 
-  it('should return row summary for object entries when getRowSummary is called', () => {
-      const summary = component.getRowSummary({ id: '1', name: 'Alice', active: true })
+  describe('getRowSummary', () => {
+    it('should summarise only the table columns in column order, joined with a comma and space', () => {
+      const row = {
+        id: '1',
+        name: 'Alice',
+        description: 'some desc',
+        status: 'active',
+        active: true,
+        testNumber: '1',
+      }
 
-      expect(summary).toBe('id: 1,name: Alice,active: true')
+      expect(component.getRowSummary(row)).toBe('name: Alice, description: some desc, status: active, testNumber: 1')
+    })
+
+    it('should leave out row keys that are not among the table columns', () => {
+      const row = { id: '1', name: 'Alice', imagePath: '/path/to/image' }
+
+      expect(component.getRowSummary(row)).toBe('name: Alice')
+    })
+
+    it('should resolve nested column ids via ObjectUtils.resolveFieldData', () => {
+      component.columns = [mockColumns[0], { ...mockColumns[1], id: 'address.city' }] as any
+      const row = { name: 'Alice', address: { city: 'Berlin' } }
+
+      expect(component.getRowSummary(row)).toBe('name: Alice, address.city: Berlin')
+    })
+
+    it('should skip columns whose value is null, undefined or an empty string', () => {
+      const row = { name: 'Alice', description: null, status: '', responsible: undefined }
+
+      expect(component.getRowSummary(row)).toBe('name: Alice')
+    })
+
+    it('should return an empty string when no column value is present', () => {
+      const row = { id: '1', description: '' }
+
+      expect(component.getRowSummary(row)).toBe('')
+    })
   })
 
   describe('accessibility semantics', () => {
